@@ -1,0 +1,69 @@
+
+#include <Arduino_GFX_Library.h>
+//#include "Arduino_GFX_dev_device.h" 
+
+#include "C:\Users\mcgreg\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSans18pt7b.h"
+const GFXfont *subFont = &FreeSans18pt7b; // Needed for height calculation
+
+#define GFX_DEV_DEVICE ESP32S3_2_1_TP
+#define GFX_BL 38
+Arduino_DataBus *bus = new Arduino_SWSPI(
+    GFX_NOT_DEFINED /* DC */, 39 /* CS */,
+    48 /* SCK */, 47 /* MOSI */, GFX_NOT_DEFINED /* MISO */);
+#define RGB_PANEL
+Arduino_ESP32RGBPanel *rgbpanel = new Arduino_ESP32RGBPanel(
+    18 /* DE */, 17 /* VSYNC */, 16 /* HSYNC */, 21 /* PCLK */,
+    4 /* R0 */, 5 /* R1 */, 6 /* R2 */, 7 /* R3 */, 15 /* R4 */,
+    8 /* G0 */, 20 /* G1 */, 3 /* G2 */, 46 /* G3 */, 9 /* G4 */, 10 /* G5 */,
+    11 /* B0 */, 12 /* B1 */, 13 /* B2 */, 14 /* B3 */, 0 /* B4 */,
+    1 /* hsync_polarity */, 10 /* hsync_front_porch */, 8 /* hsync_pulse_width */, 50 /* hsync_back_porch */,
+    1 /* vsync_polarity */, 10 /* vsync_front_porch */, 8 /* vsync_pulse_width */, 20 /* vsync_back_porch */,
+    0 /* pclk_active_neg */, 12000000 /* prefer_speed */, false /* useBigEndian */,
+    0 /* de_idle_high */, 0 /* pclk_idle_high */, 0 /* bounce_buffer_size_px */);
+Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
+    480 /* width */, 480 /* height */, rgbpanel, 0 /* rotation */, true /* auto_flush */,
+    bus, GFX_NOT_DEFINED /* RST */, st7701_type5_init_operations, sizeof(st7701_type5_init_operations));
+
+
+#ifndef GFX_DEV_DEVICE
+#error "Please configure your GFX device pins and constructor first!"
+#endif
+
+
+#define RGB565_LIGHT_GREY gfx->color565(170, 170, 170)
+
+// --- Setup Function ---
+void setup() {
+#ifdef DEV_DEVICE_INIT
+    DEV_DEVICE_INIT();
+#endif
+
+    Serial.begin(115200);
+    Serial.println("Display Test Starting...");
+    if (!gfx->begin()) {
+        Serial.println("gfx->begin() failed!"); while (1) delay(100);
+    }
+    Serial.println("GFX Initialized.");
+
+    gfx->fillScreen(RGB565_BLACK);
+    gfx->setFont(subFont);
+    gfx->setTextColor(RGB565_LIGHT_GREY);
+    gfx->setTextSize(1);
+    // Use simple print if centerText causes issues during connect
+    gfx->setCursor(10, 100);
+    gfx->print("Setup Complete");
+    delay(1000);
+
+
+#ifdef GFX_BL
+    pinMode(GFX_BL, OUTPUT);
+    digitalWrite(GFX_BL, HIGH);
+    Serial.println("Backlight ON.");
+#endif
+
+}
+
+void loop() {
+
+}
+

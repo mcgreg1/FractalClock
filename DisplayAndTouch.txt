@@ -1,0 +1,176 @@
+// Combined Minimal Display and TAMC_GT911 Touch Test
+// Uses Arduino_GFX for display and TAMC_GT911 library for touch.
+
+#include <Wire.h>                  // For I2C communication
+#include <TAMC_GT911.h>            // GT911 Touch library (Install via Library Manager)
+#include <Arduino_GFX_Library.h>   // Graphics library base
+
+// Font Include (Using the one from your example)
+#include "C:\Users\mcgreg\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSans18pt7b.h"
+const GFXfont *subFont = &FreeSans18pt7b; // Font for initial prompt
+
+// --- Display Configuration (Copied from your working test) ---
+#define GFX_BL 38
+// This bus definition might be related to display init commands for ST7701 via SPI,
+// even though it's an RGB panel. Let's keep it as it worked for you.
+Arduino_DataBus *bus = new Arduino_SWSPI(
+    GFX_NOT_DEFINED /* DC */, 39 /* CS */,
+    48 /* SCK */, 47 /* MOSI */, GFX_NOT_DEFINED /* MISO */);
+// RGB Panel Configuration
+Arduino_ESP32RGBPanel *rgbpanel = new Arduino_ESP32RGBPanel(
+    18 /* DE */, 17 /* VSYNC */, 16 /* HSYNC */, 21 /* PCLK */,
+    4 /* R0 */, 5 /* R1 */, 6 /* R2 */, 7 /* R3 */, 15 /* R4 */,
+    8 /* G0 */, 20 /* G1 */, 3 /* G2 */, 46 /* G3 */, 9 /* G4 */, 10 /* G5 */,
+    11 /* B0 */, 12 /* B1 */, 13 /* B2 */, 14 /* B3 */, 0 /* B4 */,
+    1 /* hsync_polarity */, 10 /* hsync_front_porch */, 8 /* hsync_pulse_width */, 50 /* hsync_back_porch */,
+    1 /* vsync_polarity */, 10 /* vsync_front_porch */, 8 /* vsync_pulse_width */, 20 /* vsync_back_porch */,
+    0 /* pclk_active_neg */, 12000000 /* prefer_speed */, false /* useBigEndian */,
+    0 /* de_idle_high */, 0 /* pclk_idle_high */, 0 /* bounce_buffer_size_px */);
+// RGB Display Object - Assuming st7701_type5_init_operations is defined correctly elsewhere or handled internally
+// If you get errors related to this, you might need NULL, 0 instead if no custom init ops are needed.
+Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
+    480 /* width */, 480 /* height */, rgbpanel, 0 /* rotation */, true /* auto_flush */,
+    bus, GFX_NOT_DEFINED /* RST */, st7701_type5_init_operations, sizeof(st7701_type5_init_operations));
+
+
+// --- Touch Screen Pin Configuration (!!! MUST ADJUST FOR YOUR BOARD !!!) ---
+// Using TAMC_GT911 library's approach
+#define TOUCH_GT911_SCL 45
+#define TOUCH_GT911_SDA 19
+#define TOUCH_GT911_INT -1 // Interrupt Pin (-1 if not used/connected) - VERIFY!
+#define TOUCH_GT911_RST -1 // Reset Pin (-1 if not used/connected) - VERIFY!
+
+// --- Color Definitions ---
+// Define colors using standard GFX values
+#define BLACK 0x0000
+#define WHITE 0xFFFF
+#define YELLOW 0xFFE0
+#define GFX_Color_t uint16_t // Define a type for colors if needed
+
+// Global variables for screen dimensions
+int32_t w = 480; // Set dimensions directly based on constructor
+int32_t h = 480;
+
+// Global Touch object pointer (using TAMC_GT911)
+TAMC_GT911 *ts_ptr = nullptr;
+
+// Variables for displaying touch info & clearing previous text
+static char previousTouchStr[40] = ""; // Store previous touch coordinate string
+static uint16_t prev_touch_x = 0;      // Top-left X of previous text bounding box
+static uint16_t prev_touch_y = 0;      // Top-left Y of previous text bounding box
+static uint16_t prev_touch_w = 0;      // Width of previous text bounding box
+static uint16_t prev_touch_h = 0;      // Height of previous text bounding box
+
+
+// --- Setup Function ---
+void setup() {
+    Serial.begin(115200);
+    Serial.println("GFX + TAMC_GT911 Touch Test Starting...");
+
+    // --- Initialize Graphics Display ---
+    Serial.println("Initializing GFX...");
+    if (!gfx->begin()) { // Using the 'gfx' object defined globally
+        Serial.println("gfx->begin() failed!"); while (1) delay(100);
+    }
+    Serial.println("GFX Initialized.");
+    // w and h are already set based on the constructor values
+
+    gfx->fillScreen(BLACK); // Use standard BLACK
+
+    // --- Initialize I2C and Touch Sensor (using TAMC_GT911) ---
+    Serial.println("Initializing I2C for Touch...");
+    // Define the I2C pins specifically for touch sensor
+    Wire.begin(TOUCH_GT911_SDA, TOUCH_GT911_SCL);
+
+    Serial.println("Initializing GT911 Touch Controller (TAMC_GT911)...");
+    ts_ptr = new TAMC_GT911(TOUCH_GT911_SDA, TOUCH_GT911_SCL, TOUCH_GT911_INT, TOUCH_GT911_RST, max(w, h), min(w, h));
+    if (!ts_ptr) {
+         Serial.println("Failed to allocate memory for touch object!");
+         while(1) delay(100);
+    }
+    ts_ptr->begin(); // Initialize communication with the GT911 using the library
+
+    Serial.println("GT911 Initialized.");
+
+    // --- Optional: Backlight ---
+#ifdef GFX_BL
+    pinMode(GFX_BL, OUTPUT);
+    digitalWrite(GFX_BL, HIGH);
+    Serial.println("Backlight ON.");
+#endif
+
+    // --- Display Initial Prompt ---
+    gfx->setFont(subFont); // Use your specified font
+    gfx->setTextColor(WHITE);
+    gfx->setTextSize(1); // Use size 1 for this prompt
+    gfx->setCursor(10, 50); // Position below touch coords area
+    gfx->print("Touch Test Ready");
+    Serial.println("Setup complete. Touch the screen.");
+
+}
+
+// --- Loop Function ---
+void loop() {
+     if (!ts_ptr) return; // Safety check
+
+    // --- Read Touch Data ---
+    ts_ptr->read(); // Read touch status and points using TAMC_GT911 library
+
+    // --- Prepare Touch String ---
+    char currentTouchStr[40] = ""; // Buffer for the current touch info
+    bool currentlyTouched = ts_ptr->isTouched;
+
+    if (currentlyTouched && ts_ptr->touches > 0) {
+        // Format coordinates of the first touch point
+        snprintf(currentTouchStr, sizeof(currentTouchStr), "X:%4d Y:%4d", ts_ptr->points[0].x, ts_ptr->points[0].y);
+    } // else: string remains empty if not touched
+
+    // --- Update Display Only If Touch String Changed ---
+    if (strcmp(currentTouchStr, previousTouchStr) != 0) {
+        // --- 1. Clear Previous Coordinate Text ---
+        if (prev_touch_w > 0) {
+             // Clear the rectangular area using previously stored top-left (x,y) and dimensions (w,h)
+             gfx->fillRect(prev_touch_x, prev_touch_y, prev_touch_w, prev_touch_h, BLACK);
+             prev_touch_w = 0; // Mark as cleared
+        }
+
+        // --- 2. Draw New Coordinate Text (if currently touched) ---
+        if (currentlyTouched) {
+            gfx->setFont(subFont); // Use default GFX font for coordinates display
+            gfx->setTextSize(1); // Use size 2 for coordinates
+            gfx->setTextColor(YELLOW); // Draw coords in yellow
+
+            // Calculate bounds of the NEW string to know its dimensions for clearing later
+            int16_t x1, y1; // Relative offsets from baseline cursor
+            uint16_t w1, h1; // Width and height of the text bounding box
+            gfx->getTextBounds(currentTouchStr, 0, 0, &x1, &y1, &w1, &h1);
+
+            // Define drawing position for top-left corner of text area
+            uint16_t drawAreaX = 0;
+            uint16_t drawAreaY = 0; // Draw at the very top
+
+            // Calculate cursor position (baseline) for desired top-left alignment
+            int cursorX = drawAreaX - x1;
+            int cursorY = drawAreaY - y1;
+
+            gfx->setCursor(cursorX, cursorY);
+            gfx->print(currentTouchStr);
+
+            // Store info for the next erase cycle
+            prev_touch_x = cursorX + x1; // Store absolute top-left X of the text bounding box
+            prev_touch_y = cursorY + y1; // Store absolute top-left Y of the text bounding box
+            prev_touch_w = w1;           // Store width
+            prev_touch_h = h1;           // Store height
+        } else {
+            // Not touched, reset dimensions (already cleared above)
+             prev_touch_w = 0;
+             prev_touch_h = 0;
+        }
+
+        // Update the comparison string
+        strcpy(previousTouchStr, currentTouchStr);
+
+    } // End if strcmp
+
+    delay(20); // Small delay
+}
