@@ -161,67 +161,162 @@ WiFiManager wifiManager; // <<< ADDED
 
 // In FractalClock.ino
 
-// --- WiFi Connection Function (using WiFiManager) ---
+// --- COMPLETE WiFi Connection Function (using WiFiManager - CORRECTED Callback Logic) ---
 bool connectOrConfigureWiFi() {
     Serial.println("Attempting WiFi connection...");
     String hostname = "FractalClock";
     wifiManager.setHostname(hostname.c_str());
     wifiManager.setConnectTimeout(15);
-    // wifiManager.setConfigPortalTimeout(180);
+    wifiManager.setConfigPortalTimeout(180); // 3 minutes portal timeout
 
-    // Custom Status Message Callback (Displays AP info on screen)
-    wifiManager.setAPCallback([](WiFiManager *mgr) {
-        Serial.println("WiFiManager: Entered config mode");
+    bool userSkippedWifi = false; // Flag to indicate user pressed "Ohne Wifi"
+    bool portalTimedOut = false; // Flag if portal loop timed out
+
+    // --- 1. Check if already connected ---
+    WiFi.mode(WIFI_STA); // Ensure Station mode
+    delay(100);
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Already connected to WiFi.");
+        return true; // Success, skip everything else
+    }
+
+    // --- 2. Setup and potentially run the portal ---
+    Serial.println("No existing connection, preparing WiFiManager Portal...");
+
+    // Define the AP Callback *before* calling autoConnect
+    wifiManager.setAPCallback([&userSkippedWifi, &portalTimedOut](WiFiManager *mgr) { // Capture flags
+        Serial.println("WiFiManager: Entered config mode (AP Callback)");
         Serial.print("AP Name: "); Serial.println(mgr->getConfigPortalSSID());
-        Serial.print("AP IP: "); Serial.println(WiFi.softAPIP()); // Usually 192.168.4.1
+        Serial.print("AP IP: "); Serial.println(WiFi.softAPIP());
 
         // --- Display AP info on screen ---
         gfx->fillScreen(BLACK);
-        gfx->setFont(NULL); // Default font
-        gfx->setTextSize(2); gfx->setTextColor(WHITE);
-        gfx->setCursor(10, 50);
-        gfx->println("WiFi Setup Mode"); // Title
-
-        gfx->setTextSize(1); // Smaller text for info
-        gfx->setCursor(10, 100);
-        gfx->print("AP Name: ");
-        gfx->println(mgr->getConfigPortalSSID()); // Show AP name to connect to
-
-        gfx->setCursor(10, 120);
-        gfx->print("Connect & Go To:");
-
-        gfx->setCursor(10, 140);
-        gfx->setTextColor(YELLOW); gfx->setTextSize(2);
-        gfx->print("192.168.4.1"); // <<< Display the portal IP clearly
-
+        gfx->setFont(NULL); gfx->setTextSize(2); gfx->setTextColor(WHITE);
+        gfx->setCursor(10, 50); gfx->println("WiFi Setup Mode");
+        gfx->setTextSize(1); gfx->setTextColor(WHITE);
+        gfx->setCursor(10, 100); gfx->print("AP Name: "); gfx->println(mgr->getConfigPortalSSID());
+        gfx->setCursor(10, 120); gfx->print("Connect & Go To:");
+        gfx->setCursor(10, 140); gfx->setTextColor(YELLOW); gfx->setTextSize(2);
+        gfx->print("192.168.4.1");
         gfx->setTextColor(RGB565_LIGHT_GREY); gfx->setTextSize(1);
-        gfx->setCursor(10, 180); // Position below IP
-        gfx->print("(Configure WiFi Network)"); // Add instruction
+        gfx->setCursor(10, 180); gfx->print("(Configure WiFi Network)");
 
-        // <<< THIS IS WHERE THE MESSAGE IS SHOWN DURING AP MODE >>>
-        // No need to draw it continuously in displayClock()
-    });
+        // Draw "Ohne Wifi" Button
+        const GFXfont *buttonFont = font_freesans18;
+        int16_t b_x1, b_y1; uint16_t b_w, b_h;
+        gfx->setFont(buttonFont); gfx->setTextSize(1);
+        gfx->getTextBounds("Ohne Wifi", 0, 0, &b_x1, &b_y1, &b_w, &b_h);
+        int no_wifi_button_y = 180 + 20 + NO_WIFI_BUTTON_Y_MARGIN;
+        gfx->fillRoundRect(NO_WIFI_BUTTON_X, no_wifi_button_y, NO_WIFI_BUTTON_W, NO_WIFI_BUTTON_H, 5, COLOR_BUTTON_GREY);
+        gfx->setTextColor(WHITE);
+        int text_cursor_x = NO_WIFI_BUTTON_X + (NO_WIFI_BUTTON_W - b_w) / 2 - b_x1;
+        int text_cursor_y = no_wifi_button_y + (NO_WIFI_BUTTON_H - b_h) / 2 - b_y1;
+        gfx->setCursor(text_cursor_x, text_cursor_y);
+        gfx->print("Ohne Wifi");
 
+        // --- Loop WHILE in AP Mode ---
+        // This loop runs ONLY while the AP is active, started by autoConnect below
+        Serial.println("AP Mode Active - Checking for 'Ohne Wifi' button press...");
+        unsigned long apStartTime = millis();
+        unsigned long portalTimeoutMillis = 180 * 1000UL; // Use a timeout for this check loop
+
+        while (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
+            // A. Check for manual timeout in THIS loop
+            if (millis() - apStartTime > portalTimeoutMillis) {
+                Serial.println("AP Mode Timeout reached in callback touch loop.");
+                portalTimedOut = true; // Set timeout flag
+                // Don't stop portal here, let autoConnect handle its overall timeout
+                break; // Exit this touch checking loop
+            }
+
+            // B. Check for "Ohne Wifi" Button Press
+            if (ts_ptr) {
+                ts_ptr->read();
+                if (ts_ptr->isTouched && ts_ptr->touches > 0 && !touchRegisteredThisPress) {
+                    int rawTouchX = ts_ptr->points[0].x; int rawTouchY = ts_ptr->points[0].y;
+                    int touchX = (w - 1) - rawTouchX; int touchY = (h - 1) - rawTouchY;
+                    int button_X_left = NO_WIFI_BUTTON_X; int button_X_right = NO_WIFI_BUTTON_X + NO_WIFI_BUTTON_W;
+                    int button_Y_top = no_wifi_button_y; int button_Y_bottom = button_Y_top + NO_WIFI_BUTTON_H;
+
+                    if (touchX >= button_X_left && touchX < button_X_right &&
+                        touchY >= button_Y_top && touchY < button_Y_bottom) {
+                        Serial.println("'Ohne Wifi' button pressed!");
+                        userSkippedWifi = true;          // Set the flag
+                        touchRegisteredThisPress = true; // Debounce
+                                // If user pressed the button (flag set in callback)
+                        Serial.println("User skipped WiFi setup via button.");
+                        // Ensure portal/AP is stopped if somehow still running
+                        if (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
+                            wifiManager.stopConfigPortal();
+                        }
+                        WiFi.mode(WIFI_OFF); // Turn off radios
+                        btStop();
+                        // DO NOT stop portal or return here. Just set the flag.
+                        // The autoConnect call below needs to finish or time out.
+                        break; // Exit this touch checking loop
+                    }
+                } else if (!ts_ptr->isTouched) {
+                    touchRegisteredThisPress = false; // Reset debounce on release
+                }
+            } // end if(ts_ptr)
+            else
+            {
+              // C. Process Web Server Requests (Essential!)
+              Serial.println("Wifimanager process()...");
+              wifiManager.process();
+            }
+            // D. Exit condition for the inner loop if user skipped
+            if (userSkippedWifi) {
+                break;
+            }
+
+            yield(); delay(50); // Small delay
+        } // End while AP Mode Active in Callback
+        Serial.println("Exiting AP Mode callback check loop.");
+
+        // NOTE: Do not turn off WiFi or stop portal here. Let autoConnect manage its state.
+        // The 'userSkippedWifi' flag will be checked *after* autoConnect returns.
+
+    }); // --- END of setAPCallback lambda function ---
+
+    Serial.println("Exiting the AP Mode");
+
+    // --- 4. Evaluate Outcome ---
+    if (userSkippedWifi) {
+
+        return false; // Indicate failure/skip
+    } 
+    
+    
+    // --- 3. Run autoConnect ---
+    // This will:
+    // - Try saved credentials.
+    // - If fail, start AP & run the callback defined above.
+    // - Wait for portal config/timeout OR return immediately if callback loop broke due to skip/timeout.
     Serial.println("Starting WiFiManager autoConnect...");
-    if (!wifiManager.autoConnect("FractalClockSetup")) { // AP name if portal starts
-        Serial.println("WiFiManager: Failed to connect and hit timeout");
-        gfx->fillScreen(BLACK); // Clear AP mode message
+    bool connected = wifiManager.autoConnect("FractalClockSetup");
+    if (connected) {
+        // Connected successfully (either via saved creds or portal)
+        Serial.println("\nWiFi connected!");
+        Serial.print("IP address: "); Serial.println(WiFi.localIP());
+        gfx->fillScreen(BLACK);
+        gfx->setCursor(10, h/2 -10); gfx->setTextColor(WHITE); gfx->setTextSize(1); gfx->setFont(NULL);
+        gfx->print("WiFi Connected!");
+        delay(1500);
+        return true;
+    } else {
+        // autoConnect returned false, and user didn't skip (likely timeout)
+        Serial.println("WiFiManager: Failed to connect (portal timed out or failed).");
+        WiFi.mode(WIFI_OFF); // Ensure radios are off
+        btStop();
+        // Display failure message
+        gfx->fillScreen(BLACK);
         gfx->setCursor(10, h/2 -10); gfx->setTextColor(RED); gfx->setTextSize(1); gfx->setFont(NULL);
-        gfx->print("WiFi Config Failed/Timeout!");
+        gfx->print("WiFi Config Failed!");
         delay(3000);
         return false;
     }
-
-    // Connected successfully
-    Serial.println("\nWiFi connected!");
-    Serial.print("IP address: "); Serial.println(WiFi.localIP());
-    gfx->fillScreen(BLACK); // Clear AP mode message
-    gfx->setCursor(10, h/2 -10); gfx->setTextColor(WHITE); gfx->setTextSize(1); gfx->setFont(NULL);
-    gfx->print("WiFi Connected!");
-    delay(1500);
-    return true;
-}
-
+} // --- END of connectOrConfigureWiFi function ---
 
 // --- Setup ---
 void setup() {
@@ -229,7 +324,7 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Fractal Clock + WiFiManager Starting...");
 
-    // Init GFX & Touch
+    // --- Initialize GFX & Touch ---
     Serial.println("Initializing GFX...");
     if (!gfx->begin()) { Serial.println("gfx->begin() failed!"); while (1); }
     w = gfx->width(); h = gfx->height();
@@ -241,56 +336,66 @@ void setup() {
     ts_ptr = new TAMC_GT911(TOUCH_GT911_SDA, TOUCH_GT911_SCL, TOUCH_GT911_INT, TOUCH_GT911_RST, max(w, h), min(w, h));
     if (!ts_ptr) { Serial.println("Failed touch alloc!"); while (1); }
     ts_ptr->begin();
+    // ts_ptr->setRotation(ROTATION_NORMAL); // Keep commented unless needed
     Serial.println("GT911 Initialized.");
     #ifdef GFX_BL
         pinMode(GFX_BL, OUTPUT); digitalWrite(GFX_BL, HIGH); Serial.println("Backlight ON.");
     #endif
 
     // --- Network and Time Setup using WiFiManager ---
-    currentClockState = STATE_WAITING_FOR_WIFI; // Tentative state
+    currentClockState = STATE_WAITING_FOR_WIFI; // Tentative state before calling connect
 
-    wifiManager.resetSettings(); // FIXME
+    bool wifiConnected = connectOrConfigureWiFi(); // Attempt connection or run portal
 
-    if (connectOrConfigureWiFi()) { // Try connecting or start config portal
-        // WiFi is Connected! Proceed with NTP
+    if (wifiConnected) {
+        // --- WiFi is Connected: Proceed with NTP ---
         currentClockState = STATE_WAITING_FOR_NTP;
-        syncTimeNTP(); // Attempt NTP sync
+        syncTimeNTP(); // Attempt NTP sync (sets timeSynchronized flag)
 
-        if (timeSynchronized) { // NTP Success
+        if (timeSynchronized) {
+            // --- NTP Success: Seed time and run ---
             if (getLocalTime(&timeinfo, 5000)) {
-                Serial.println("Initial time obtained and stored locally.");
-                lastNtpSyncMillis = millis();
+                Serial.println("Initial time obtained via NTP and stored locally.");
+                Serial.print("Current time struct: "); Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+                lastNtpSyncMillis = millis(); // Start NTP re-sync timer
                 currentClockState = STATE_RUNNING_NTP;
                 gfx->fillScreen(BLACK); // Clear previous messages
-                displayStaticElements(&timeinfo);
-            } else { // Seeding failed
-                Serial.println("Error: Failed to seed time after NTP sync!");
-                timeSynchronized = false;
-                currentClockState = STATE_SETTING_TIME; // Fallback
+                displayStaticElements(&timeinfo); // Draw static parts
+            } else {
+                // --- NTP Succeeded but Seeding Failed (Error) ---
+                Serial.println("Error: Failed to seed local time struct after NTP sync!");
+                timeSynchronized = false; // Mark time as invalid
+                currentClockState = STATE_SETTING_TIME; // Fallback to manual set
+                // Go to the initialization block below
             }
-        } else { // NTP Failed
-            Serial.println("Initial NTP sync failed. Entering manual time set mode.");
-            currentClockState = STATE_SETTING_TIME;
+        } else {
+            // --- NTP Failed ---
+            Serial.println("Initial NTP sync failed after WiFi connect. Entering manual time set mode.");
+            currentClockState = STATE_SETTING_TIME; // Fallback to manual set
+             // Go to the initialization block below
         }
-    } else { // WiFiManager failed (timeout or couldn't connect)
-        Serial.println("WiFi connection failed via WiFiManager. Entering manual time set mode.");
+    } else {
+        // --- WiFi Connection / Configuration Failed or Skipped ---
+        Serial.println("WiFi connection/configuration failed or skipped. Entering manual time set mode.");
         currentClockState = STATE_SETTING_TIME;
-        timeSynchronized = false;
+        timeSynchronized = false; // Ensure time is marked as invalid
+         // Go to the initialization block below
     }
 
-    // --- Initialize Manual Time Set if Needed ---
+    // --- Initialize Manual Time Set Screen (If required by above logic) ---
     if (currentClockState == STATE_SETTING_TIME) {
-        Serial.println("Initializing time for manual setting.");
-        timeinfo = {0}; timeinfo.tm_hour = 12; timeinfo.tm_min = 0; timeinfo.tm_sec = 0;
+        Serial.println("Initializing display for manual time setting.");
+        timeinfo = {0}; // Clear struct
+        timeinfo.tm_hour = 12; timeinfo.tm_min = 0; timeinfo.tm_sec = 0;
         timeinfo.tm_mday = 1; timeinfo.tm_mon = 0; timeinfo.tm_year = 124; // 2024
-        mktime(&timeinfo); // Calculate initial weekday
-        needsStaticRedraw = true;
-        displaySetTimeScreen(&timeinfo);
+        mktime(&timeinfo); // Calculate initial weekday for default date
+        needsStaticRedraw = true; // Static elements need drawing after OK press
+        displaySetTimeScreen(&timeinfo); // Show the setting screen
     }
 
-    previousMillis = millis(); // Start the 1-second display timer
-}
-
+    previousMillis = millis(); // Start the 1-second loop timer regardless of state
+    Serial.println("Setup Complete. Entering main loop.");
+} // End setup()
 // --- Loop ---
 void loop() {
     unsigned long currentMillis = millis();

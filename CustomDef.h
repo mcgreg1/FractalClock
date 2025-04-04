@@ -77,6 +77,12 @@ enum ClockState {
 #define OK_BUTTON_X       ((w - OK_BUTTON_W) / 2)
 // OK_BUTTON_Y is calculated dynamically
 
+#define NO_WIFI_BUTTON_W  180 // Width for "Ohne Wifi" button
+#define NO_WIFI_BUTTON_H  50  // Height
+#define NO_WIFI_BUTTON_X  ((w - NO_WIFI_BUTTON_W) / 2) // Center horizontally
+#define NO_WIFI_BUTTON_Y_MARGIN 40 // Space below last text line
+extern uint16_t COLOR_BUTTON_GREY; // Button background color
+
 // --- Factor String Buffer Size ---
 #define MAX_FACTOR_STR_LEN 512 // Max length for factor string storage
 

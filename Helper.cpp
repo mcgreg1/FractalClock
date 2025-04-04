@@ -1,11 +1,13 @@
 #include "CustomDef.h" // Include defines and globals
 #include "Helper.h"    // Include function declarations
 
+
 // Define colors that need the gfx object
 bool firstDisplayDone = false;
 uint16_t RGB565_LIGHT_GREY;
 uint16_t COLOR_OK_BUTTON_GREEN;
 uint16_t COLOR_DEBUG_CYAN;
+uint16_t COLOR_BUTTON_GREY;
 
 // WiFi (DEFINITION WITH VALUE)
 const char *ssid = "Pandora2";
@@ -47,6 +49,8 @@ void initializeColors() {
     RGB565_LIGHT_GREY = gfx->color565(170, 170, 170);
     COLOR_OK_BUTTON_GREEN = gfx->color565(0, 180, 0);
     COLOR_DEBUG_CYAN = gfx->color565(0, 255, 255); // Initialize the debug color
+        COLOR_BUTTON_GREY = gfx->color565(100, 100, 100); // Define grey color
+    set_time_ok_x_left = (w - OK_BUTTON_W) / 2;
 }
 
 // --- WiFi Connection ---
