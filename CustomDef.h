@@ -10,17 +10,23 @@
 
 // --- Font Includes ---
 // Make sure paths are correct for your system
+
+#include "C:\Users\mcgre\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSansBold18pt7b.h"
+#include "C:\Users\mcgre\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSans18pt7b.h"
+#include "C:\Users\mcgre\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSans12pt7b.h"
+
+/*
 #include "C:\Users\mcgreg\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSansBold18pt7b.h"
 #include "C:\Users\mcgreg\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSans18pt7b.h"
 #include "C:\Users\mcgreg\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts\FreeSans12pt7b.h"
-
+*/
 // --- Display Configuration ---
 #define GFX_BL 38
 extern Arduino_DataBus *bus; // Declare as extern, define in .ino
 extern Arduino_ESP32RGBPanel *rgbpanel; // Declare as extern
 extern Arduino_RGB_Display *gfx;      // Declare as extern
-extern const uint8_t st7701_type5_init_operations[]; // Declare if used, define elsewhere if needed
-extern const int st7701_type5_init_operations_len;  // Declare if used
+//extern const uint8_t st7701_type5_init_operations[]; // Declare if used, define elsewhere if needed
+//extern const int st7701_type5_init_operations_len;  // Declare if used
 
 // --- WiFi Credentials ---
 extern const char *ssid;     // DECLARATION ONLY
@@ -84,6 +90,17 @@ extern ClockState currentClockState;     // Current state of the clock
 extern const char *Wochentage[];
 extern const char *Monate[];
 
+// --- Time Setting Screen Layout Globals (GFX Coordinates, 0,0 Top-Left) ---
+extern int set_time_y_top;         // Calculated Top Y edge of HH:MM:SS text
+extern int set_time_touch_y_top;   // Calculated Top Y edge of the touch boxes below time
+extern int set_time_hour_x_left;   // Calculated Left X edge of Hour touch box
+extern int set_time_minute_x_left; // Calculated Left X edge of Minute touch box
+extern int set_time_box_width;     // Width for BOTH Hour and Minute touch boxes
+extern int set_time_box_height;    // Height for BOTH Hour and Minute touch boxes
+extern int set_time_ok_y_top;      // Calculated Top Y edge of OK button box
+extern int set_time_ok_x_left;     // Calculated Left X edge of OK button box (uses OK_BUTTON_X)
+
+
 // --- Color Definitions ---
 #define BLACK 0x0000
 #define WHITE 0xFFFF
@@ -93,6 +110,9 @@ extern const char *Monate[];
 #define BLUE  0x001F
 extern uint16_t RGB565_LIGHT_GREY; // Define in Helper.cpp using gfx
 extern uint16_t COLOR_OK_BUTTON_GREEN;      // Define in Helper.cpp using gfx
+// Add a color for the debug boxes
+#define RGB565_DEBUG_CYAN gfx->color565(0, 255, 255) // Define in Helper.cpp
+extern uint16_t COLOR_DEBUG_CYAN; // Declare extern
 
 // --- Global Touch Object Pointer ---
 extern TAMC_GT911 *ts_ptr; // Define in .ino

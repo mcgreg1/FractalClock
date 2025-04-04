@@ -5,10 +5,11 @@
 bool firstDisplayDone = false;
 uint16_t RGB565_LIGHT_GREY;
 uint16_t COLOR_OK_BUTTON_GREEN;
+uint16_t COLOR_DEBUG_CYAN;
 
 // WiFi (DEFINITION WITH VALUE)
 const char *ssid = "Pandora2";
-const char *password = "LetMeIn#123";
+const char *password = "Let2MeIn#123";
 
 // NTP (DEFINITION WITH VALUE)
 const char *ntpServer = "pool.ntp.org";
@@ -29,11 +30,22 @@ const char *Wochentage[] = {"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donner
 const char *Monate[] = {"Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"};
 
 
+// --- Time Setting Layout Globals ---
+int set_time_y_top = 330;
+int set_time_touch_y_top = 330;
+int set_time_hour_x_left = 370;
+int set_time_minute_x_left = 270;
+int set_time_box_width = 70;   // Default/initial width, can be adjusted
+int set_time_box_height = 70;   // Default/initial height
+int set_time_ok_y_top = 200;
+int set_time_ok_x_left = 310;
+
 
 // Initialization helper
 void initializeColors() {
     RGB565_LIGHT_GREY = gfx->color565(170, 170, 170);
     COLOR_OK_BUTTON_GREEN = gfx->color565(0, 180, 0);
+    COLOR_DEBUG_CYAN = gfx->color565(0, 255, 255); // Initialize the debug color
 }
 
 // --- WiFi Connection ---
@@ -141,9 +153,10 @@ void displayStaticElements(const struct tm* currentTime) {
     if (currentClockState == STATE_RUNNING_NTP) {
 
       char buffer[40];
-      snprintf(buffer, sizeof(buffer), "%s,", Wochentage[currentTime->tm_wday]);
+      snprintf(buffer, sizeof(buffer), "%s,\n", Wochentage[currentTime->tm_wday]);
+      centerText(buffer, 10, RGB565_LIGHT_GREY, font_freesansbold18, 1);
       snprintf(buffer, sizeof(buffer), "%d. %s %d", currentTime->tm_mday, Monate[currentTime->tm_mon], currentTime->tm_year + 1900);
-      centerText(buffer, y_date, RGB565_LIGHT_GREY, font_freesansbold18, 1);
+      centerText(buffer, 20+mainFontHeight, RGB565_LIGHT_GREY, font_freesansbold18, 1);
     }
 }
 
@@ -234,51 +247,6 @@ void displayClock(const struct tm* currentTime) {
     }
 }
 
-
-// Displays the manual time setting interface
-void displaySetTimeScreen(const struct tm* currentTimeToDisplay) {
-     gfx->fillScreen(BLACK);
-
-    // --- Fonts ---
-    const GFXfont *mainFont = font_freesansbold18; // Large time
-    const GFXfont *promptFont = font_freesans18; // Instructions
-    const GFXfont *buttonFont = font_freesansbold18; // OK button
-
-    // --- Calculate Layout ---
-    int16_t temp_x, temp_y;
-    uint16_t temp_w, mainFontHeight, promptFontHeight, buttonFontHeight;
-    gfx->setFont(mainFont); gfx->setTextSize(2);
-    gfx->getTextBounds("00:00:00", 0, 0, &temp_x, &temp_y, &temp_w, &mainFontHeight);
-    gfx->setFont(promptFont); gfx->setTextSize(1);
-    gfx->getTextBounds("A", 0, 0, &temp_x, &temp_y, &temp_w, &promptFontHeight);
-    gfx->setFont(buttonFont); gfx->setTextSize(1);
-    gfx->getTextBounds("OK", 0, 0, &temp_x, &temp_y, &temp_w, &buttonFontHeight);
-
-    int lineSpacing = 15;
-    int totalHeight = mainFontHeight + promptFontHeight + OK_BUTTON_H + (lineSpacing * 2);
-    int startY = (h - totalHeight) / 2; if (startY < 5) startY = 5;
-    int y_time_set = startY;
-    int y_prompt = y_time_set + mainFontHeight + lineSpacing;
-    int y_ok_button = y_prompt + promptFontHeight + lineSpacing;
-
-    // --- Draw Time ---
-    char timeSet[9];
-    snprintf(timeSet, sizeof(timeSet), "%02d:%02d:00", currentTimeToDisplay->tm_hour, currentTimeToDisplay->tm_min);
-    centerText(timeSet, y_time_set, WHITE, mainFont, 2);
-
-    // --- Draw Prompt ---
-    centerText("Bitte Uhrzeit einstellen", y_prompt, RGB565_LIGHT_GREY, promptFont, 1);
-
-    // --- Draw OK Button ---
-    gfx->fillRoundRect(OK_BUTTON_X, y_ok_button, OK_BUTTON_W, OK_BUTTON_H, 5, COLOR_OK_BUTTON_GREEN);
-    gfx->setTextColor(BLACK); gfx->setFont(buttonFont); gfx->setTextSize(1);
-    gfx->getTextBounds("OK", 0, 0, &temp_x, &temp_y, &temp_w, &buttonFontHeight);
-    int ok_text_cursor_x = OK_BUTTON_X + (OK_BUTTON_W - temp_w) / 2 - temp_x;
-    int ok_text_cursor_y = y_ok_button + (OK_BUTTON_H - buttonFontHeight) / 2 - temp_y;
-    gfx->setCursor(ok_text_cursor_x, ok_text_cursor_y);
-    gfx->print("OK");
-}
-
 // Draws the current touch coordinates with timeout
 void displayTouchCoords() {
     char currentCoordsStr[20];
@@ -293,7 +261,7 @@ void displayTouchCoords() {
             strcpy(currentCoordsStr, ""); // Ensure comparison string is empty
         } else {
             // Format current visible coords
-            snprintf(currentCoordsStr, sizeof(currentCoordsStr), "T:%3d,%3d", lastDisplayedTouchX, lastDisplayedTouchY);
+            snprintf(currentCoordsStr, sizeof(currentCoordsStr), " T:X%3d,Y%3d", lastDisplayedTouchX, lastDisplayedTouchY);
             // Check if redraw is needed (content hasn't changed, but maybe it was cleared?)
              if(strcmp(currentCoordsStr, previousTouchCoordsStr) != 0 || prev_touch_coords_w == 0) {
                  needsRedraw = true;
@@ -358,58 +326,205 @@ void centerText(const char *text, int y, uint16_t color, const GFXfont *font, ui
     gfx->setCursor(cursor_x, cursor_y); gfx->setTextColor(color); gfx->print(text);
 }
 
+// In Helper.cpp
 
-// --- Touch Handling ---
+#include "CustomDef.h" // Includes defines and globals
+#include "Helper.h"    // Includes function declarations
+
+// ... other global definitions from Helper.cpp (colors, fonts, etc.) ...
+
+
+// --- Display Time Setting Screen ---
+// Calculates layout dynamically, assumes standard GFX coordinates (0,0 Top-Left)
+// Draws debug boxes shifted left and closer vertically to the time display.
+void displaySetTimeScreen(const struct tm* currentTimeToDisplay) {
+    gfx->fillScreen(BLACK);
+
+    // --- Fonts ---
+    const GFXfont *mainFont = font_freesansbold18; // Large time
+    const GFXfont *promptFont = font_freesans18;   // Instructions
+    const GFXfont *buttonFont = font_freesansbold18; // OK button
+
+    // --- Calculate Font Heights ---
+    int16_t temp_x_t, temp_y_t, temp_x_p, temp_y_p, temp_x_b, temp_y_b;
+    uint16_t temp_w_t, time_h, temp_w_p, prompt_h, temp_w_b, button_h; // Specific height vars
+    gfx->setFont(mainFont); gfx->setTextSize(2);
+    gfx->getTextBounds("00:00:00", 0, 0, &temp_x_t, &temp_y_t, &temp_w_t, &time_h); // Gets time_h
+    gfx->setFont(promptFont); gfx->setTextSize(1);
+    gfx->getTextBounds("A", 0, 0, &temp_x_p, &temp_y_p, &temp_w_p, &prompt_h); // Gets prompt_h
+    gfx->setFont(buttonFont); gfx->setTextSize(1);
+    gfx->getTextBounds("OK", 0, 0, &temp_x_b, &temp_y_b, &temp_w_b, &button_h); // Gets button_h
+
+    int lineSpacing = 15; // Space between main elements
+
+    // --- Calculate Centered Layout ---
+    // Height includes Time, Prompt, OK Button, and spacing
+    int totalHeight = time_h + prompt_h + OK_BUTTON_H + (lineSpacing * 2);
+    int startY = (h - totalHeight) / 2; // Top Y of the entire block
+    if (startY < 5) startY = 5;
+
+    int y_time_set_target_top = startY; // Top edge target for centerText for the time
+
+    // --- Calculate ACTUAL draw position of time text ---
+    int time_actual_x = (w - temp_w_t) / 2; // Use time width (temp_w_t) for centering
+    int time_actual_y = y_time_set_target_top; // Actual Top edge Y where time text bounding box starts
+
+    // --- Draw Large Time (HH:MM:00) ---
+    char timeSet[9];
+    snprintf(timeSet, sizeof(timeSet), "%02d:%02d:00", currentTimeToDisplay->tm_hour, currentTimeToDisplay->tm_min);
+    centerText(timeSet, y_time_set_target_top, WHITE, mainFont, 2); // Draw using centerText
+
+    // --- Calculate Y positions for elements BELOW the time ---
+    int y_prompt = time_actual_y + time_h + lineSpacing; // Position below actual time height
+    int y_ok_button = y_prompt + prompt_h + lineSpacing; // Position below prompt
+
+    // --- Draw Prompt Text ---
+    centerText("Bitte Uhrzeit einstellen", y_prompt, RGB565_LIGHT_GREY, promptFont, 1);
+
+    // --- Draw OK Button ---
+    gfx->fillRoundRect(OK_BUTTON_X, y_ok_button, OK_BUTTON_W, OK_BUTTON_H, 5, COLOR_OK_BUTTON_GREEN);
+    gfx->setTextColor(BLACK); gfx->setFont(buttonFont); gfx->setTextSize(1);
+    int ok_text_cursor_x = OK_BUTTON_X + (OK_BUTTON_W - temp_w_b) / 2 - temp_x_b;
+    int ok_text_cursor_y = y_ok_button + (OK_BUTTON_H - button_h) / 2 - temp_y_b;
+    gfx->setCursor(ok_text_cursor_x, ok_text_cursor_y);
+    gfx->print("OK");
+
+
+    int original_boxes_y_top = time_actual_y + time_h + 5;
+
+    int boxes_y_top = time_actual_y + time_h -55;//THIS IS IMPORTANT!!!
+
+    // Use the previously calculated shifted X positions
+    int touch_box_width = 100; // Keep width for now, adjust if needed
+    int shift_left_amount = 40;
+    // int time_actual_x = (w - temp_w_t) / 2; // Already calculated above
+    int hour_box_x_orig = time_actual_x + (temp_w_t * 0.1);
+    int minute_section_width = temp_w_t * 0.4;
+    int minute_box_x_orig = time_actual_x + temp_w_t - minute_section_width - (temp_w_t * 0.1);
+    minute_box_x_orig = max(0, minute_box_x_orig);
+    int hour_box_x = max(0, hour_box_x_orig - shift_left_amount);
+    int minute_box_x = max(0, minute_box_x_orig - shift_left_amount);
+
+    gfx->drawRect(hour_box_x, boxes_y_top, touch_box_width, TIME_SET_TOUCH_H, COLOR_DEBUG_CYAN);
+    gfx->drawRect(minute_box_x, boxes_y_top, touch_box_width, TIME_SET_TOUCH_H, COLOR_DEBUG_CYAN);
+
+    // Print boundaries for debugging
+    Serial.printf("DRAW Hour Box: X=%d, Y=%d, W=%d, H=%d\n", hour_box_x, boxes_y_top, touch_box_width, TIME_SET_TOUCH_H);
+    Serial.printf("DRAW Min Box : X=%d, Y=%d, W=%d, H=%d\n", minute_box_x, boxes_y_top, touch_box_width, TIME_SET_TOUCH_H);
+    Serial.printf("DRAW OK Box  : X=%d, Y=%d, W=%d, H=%d\n", OK_BUTTON_X, y_ok_button, OK_BUTTON_W, OK_BUTTON_H);
+}
+
+
+// --- Handle Touch Input During Time Setting ---
 void handleTimeSettingTouch() {
     if (!ts_ptr || !ts_ptr->isTouched || ts_ptr->touches <= 0) {
         touchRegisteredThisPress = false; return;
     }
     if (touchRegisteredThisPress) return; // Debounce
 
-    int touchX = ts_ptr->points[0].x;
-    int touchY = ts_ptr->points[0].y;
+    // --- Get RAW touch coordinates & translate to Standard GFX Coords ---
+    int rawTouchX = ts_ptr->points[0].x;
+    int rawTouchY = ts_ptr->points[0].y;
+    // <<< FIX: Ensure translated variables are declared and assigned >>>
+    int touchX = (w - 1) - rawTouchX; // Translated X (0=Left)
+    int touchY = (h - 1) - rawTouchY; // Translated Y (0=Top)
+    Serial.printf("Raw: %d,%d => GFX: %d,%d | ", rawTouchX, rawTouchY, touchX, touchY);
+
     bool needsRedraw = false;
 
-    // --- Calculate dynamic Y positions for touch zones ---
+    // --- Recalculate element positions (MATCHING displaySetTimeScreen) ---
+    // Get Time dimensions first
     const GFXfont *mainFont = font_freesansbold18;
+    char timeSet[9];
+    snprintf(timeSet, sizeof(timeSet), "%02d:%02d:00", timeinfo.tm_hour, timeinfo.tm_min);
+    int16_t time_x1, time_y1; uint16_t time_w, time_h;
+    gfx->setFont(mainFont); gfx->setTextSize(2);
+    gfx->getTextBounds(timeSet, 0, 0, &time_x1, &time_y1, &time_w, &time_h);
+
+    // Get Prompt/Button heights
     const GFXfont *promptFont = font_freesans18;
     const GFXfont *buttonFont = font_freesansbold18;
-    int16_t temp_x, temp_y;
-    uint16_t temp_w, mainFontHeight, promptFontHeight, buttonFontHeight;
-    gfx->setFont(mainFont); gfx->setTextSize(2);
-    gfx->getTextBounds("00:00:00", 0, 0, &temp_x, &temp_y, &temp_w, &mainFontHeight);
+    int16_t temp_x_p, temp_y_p, temp_x_b, temp_y_b;
+    uint16_t temp_w_p, temp_h_p, temp_w_b, temp_h_b;
     gfx->setFont(promptFont); gfx->setTextSize(1);
-    gfx->getTextBounds("A", 0, 0, &temp_x, &temp_y, &temp_w, &promptFontHeight);
+    gfx->getTextBounds("A", 0, 0, &temp_x_p, &temp_y_p, &temp_w_p, &temp_h_p); // prompt_h = temp_h_p
     gfx->setFont(buttonFont); gfx->setTextSize(1);
-    gfx->getTextBounds("OK", 0, 0, &temp_x, &temp_y, &temp_w, &buttonFontHeight);
+    gfx->getTextBounds("OK", 0, 0, &temp_x_b, &temp_y_b, &temp_w_b, &temp_h_b); // button_h = temp_h_b
+
     int lineSpacing = 15;
-    int totalHeight = mainFontHeight + promptFontHeight + OK_BUTTON_H + (lineSpacing * 2);
-    int startY = (h - totalHeight) / 2; if (startY < 5) startY = 5;
-    int y_time_set_top = startY;
-    int time_touch_zone_Y = y_time_set_top + TIME_SET_Y_OFFSET; // Approx below time display
-    int y_ok_button_top = y_time_set_top + mainFontHeight + lineSpacing + promptFontHeight + lineSpacing;
+    int totalHeightApprox = time_h + temp_h_p + OK_BUTTON_H + (lineSpacing * 2);
+    int startY = (h - totalHeightApprox) / 2; if (startY < 5) startY = 5;
+    int time_actual_y = startY; // Top Y of time text bounding box
 
-    // --- Check Touch Zones ---
-    if (touchX >= HOUR_TOUCH_X && touchX < (HOUR_TOUCH_X + HOUR_TOUCH_W) &&
-        touchY >= time_touch_zone_Y && touchY < (time_touch_zone_Y + TIME_SET_TOUCH_H)) {
-        Serial.println("Hour Zone Touched");
-        timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24; needsRedraw = true; touchRegisteredThisPress = true;
-    } else if (touchX >= MINUTE_TOUCH_X && touchX < (MINUTE_TOUCH_X + MINUTE_TOUCH_W) &&
-             touchY >= time_touch_zone_Y && touchY < (time_touch_zone_Y + TIME_SET_TOUCH_H)) {
-        Serial.println("Minute Zone Touched");
-        timeinfo.tm_min = (timeinfo.tm_min + 1) % 60; needsRedraw = true; touchRegisteredThisPress = true;
-    } else if (touchX >= OK_BUTTON_X && touchX < (OK_BUTTON_X + OK_BUTTON_W) &&
-             touchY >= y_ok_button_top && touchY < (y_ok_button_top + OK_BUTTON_H)) {
-        Serial.println("OK Button Touched");
-        timeinfo.tm_sec = 0; mktime(&timeinfo); // Normalize time (calculates weekday)
-        currentClockState = STATE_RUNNING_MANUAL; timeSynchronized = true; needsStaticRedraw = true;
-        firstDisplayDone = false; touchRegisteredThisPress = true;
+    // --- Define Hit Zone Boundaries using STANDARD GFX Coordinates - ADJUSTED Y ---
+    // Y boundaries
+    int original_time_touch_zone_Y_top = time_actual_y + time_h + 5; // Original position (5px below time)
+    int time_touch_zone_Y_top = original_time_touch_zone_Y_top - 70; // Adjust upwards
+    if (time_touch_zone_Y_top < 0) time_touch_zone_Y_top = 0; // Prevent negative Y
+    int time_touch_zone_Bottom = time_touch_zone_Y_top + TIME_SET_TOUCH_H; // Bottom edge uses adjusted top + height
+
+    // X boundaries (Match drawing logic with shift)
+    int touch_box_width = 100;
+    int shift_left_amount = 40;
+    int time_actual_x = (w - time_w) / 2;
+    int hour_touch_X_orig = time_actual_x + (time_w * 0.1);
+    int minute_section_width = time_w * 0.4;
+    int minute_touch_X_orig = time_actual_x + time_w - minute_section_width - (time_w * 0.1);
+    minute_touch_X_orig = max(0, minute_touch_X_orig);
+    int hour_touch_X_left = max(0, hour_touch_X_orig - shift_left_amount);
+    int hour_touch_X_right = hour_touch_X_left + touch_box_width;
+    int minute_touch_X_left = max(0, minute_touch_X_orig - shift_left_amount);
+    int minute_touch_X_right = minute_touch_X_left + touch_box_width;
+
+    // OK Button boundaries
+    int y_prompt = time_actual_y + time_h + lineSpacing;
+    int y_ok_button_top = y_prompt + temp_h_p + lineSpacing;
+    int y_ok_button_bottom = y_ok_button_top + OK_BUTTON_H;
+    int ok_button_X_left = OK_BUTTON_X;
+    int ok_button_X_right = OK_BUTTON_X + OK_BUTTON_W;
+
+
+    // Print calculated hit zones for debugging
+    // Serial.printf("Hit Hour: X[%d-%d] Y[%d-%d] | ", hour_touch_X_left, hour_touch_X_right, time_touch_zone_Y_top, time_touch_zone_Bottom);
+    // Serial.printf("Hit Min : X[%d-%d] Y[%d-%d] | ", minute_touch_X_left, minute_touch_X_right, time_touch_zone_Y_top, time_touch_zone_Bottom);
+    // Serial.printf("Hit OK  : X[%d-%d] Y[%d-%d]\n", ok_button_X_left, ok_button_X_right, y_ok_button_top, y_ok_button_bottom);
+
+
+    // --- Check Touch Zones using TRANSLATED Coordinates (touchX, touchY) and FINAL boundaries ---
+    // Hour Zone
+    if (touchX >= hour_touch_X_left && touchX < hour_touch_X_right &&
+        touchY >= time_touch_zone_Y_top && touchY < time_touch_zone_Bottom) {
+        Serial.println("ACTION: Hour Zone Touched");
+        timeinfo.tm_hour = (timeinfo.tm_hour + 1) % 24;
+        needsRedraw = true;
+        touchRegisteredThisPress = true;
+    }
+    // Minute Zone
+    else if (touchX >= minute_touch_X_left && touchX < minute_touch_X_right &&
+             touchY >= time_touch_zone_Y_top && touchY < time_touch_zone_Bottom) {
+        Serial.println("ACTION: Minute Zone Touched");
+        timeinfo.tm_min = (timeinfo.tm_min + 1) % 60;
+        needsRedraw = true;
+        touchRegisteredThisPress = true;
+    }
+    // OK Button Zone
+    else if (touchX >= ok_button_X_left && touchX < ok_button_X_right &&
+             touchY >= y_ok_button_top && touchY < y_ok_button_bottom) {
+        Serial.println("ACTION: OK Button Touched");
+        mktime(&timeinfo);
+        currentClockState = STATE_RUNNING_MANUAL;
+        timeSynchronized = true; needsStaticRedraw = true; firstDisplayDone = false;
+        touchRegisteredThisPress = true;
+    } else {
+        Serial.println("ACTION: Touch outside defined zones.");
     }
 
+    // Redraw Setting Screen if Hour/Minute Changed
     if (needsRedraw) {
-        displaySetTimeScreen(&timeinfo); // Redraw setting screen with new time
+        displaySetTimeScreen(&timeinfo);
     }
-}
+} // End handleTimeSettingTouch
+// ... (Rest of Helper.cpp functions: displayClock, displayStaticElements, primeFactorsToString, etc.) ...
 
 
 // --- Time & Math ---
