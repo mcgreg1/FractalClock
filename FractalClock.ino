@@ -1,5 +1,3 @@
-// FractalClock Main Sketch - Simplified (No Task/Queue/Cache) + Touch
-
 #include "CustomDef.h" // Includes, Defines, Globals
 #include "Helper.h"    // Function Declarations
 
@@ -20,7 +18,7 @@ bool touchRegisteredThisPress = false;
 bool needsStaticRedraw = false;
 // Touch Coordinate Display
 unsigned long lastTouchMillis = 0;
-const unsigned long touchDisplayTimeout = 3000; // ms
+//const unsigned long touchDisplayTimeout = 3000; // ms
 bool touchCoordsVisible = false;
 int lastDisplayedTouchX = 0;
 int lastDisplayedTouchY = 0;
@@ -159,73 +157,128 @@ Arduino_ESP32RGBPanel *rgbpanel = new Arduino_ESP32RGBPanel(
 Arduino_RGB_Display *gfx = new Arduino_RGB_Display(
     480 /* width */, 480 /* height */, rgbpanel, 0 /* rotation */, true /* auto_flush */,
     bus, GFX_NOT_DEFINED /* RST */, custom_st7701_init_operations, custom_st7701_init_operations_len); // Use defined length
+WiFiManager wifiManager; // <<< ADDED
+
+// In FractalClock.ino
+
+// --- WiFi Connection Function (using WiFiManager) ---
+bool connectOrConfigureWiFi() {
+    Serial.println("Attempting WiFi connection...");
+    String hostname = "FractalClock";
+    wifiManager.setHostname(hostname.c_str());
+    wifiManager.setConnectTimeout(15);
+    // wifiManager.setConfigPortalTimeout(180);
+
+    // Custom Status Message Callback (Displays AP info on screen)
+    wifiManager.setAPCallback([](WiFiManager *mgr) {
+        Serial.println("WiFiManager: Entered config mode");
+        Serial.print("AP Name: "); Serial.println(mgr->getConfigPortalSSID());
+        Serial.print("AP IP: "); Serial.println(WiFi.softAPIP()); // Usually 192.168.4.1
+
+        // --- Display AP info on screen ---
+        gfx->fillScreen(BLACK);
+        gfx->setFont(NULL); // Default font
+        gfx->setTextSize(2); gfx->setTextColor(WHITE);
+        gfx->setCursor(10, 50);
+        gfx->println("WiFi Setup Mode"); // Title
+
+        gfx->setTextSize(1); // Smaller text for info
+        gfx->setCursor(10, 100);
+        gfx->print("AP Name: ");
+        gfx->println(mgr->getConfigPortalSSID()); // Show AP name to connect to
+
+        gfx->setCursor(10, 120);
+        gfx->print("Connect & Go To:");
+
+        gfx->setCursor(10, 140);
+        gfx->setTextColor(YELLOW); gfx->setTextSize(2);
+        gfx->print("192.168.4.1"); // <<< Display the portal IP clearly
+
+        gfx->setTextColor(RGB565_LIGHT_GREY); gfx->setTextSize(1);
+        gfx->setCursor(10, 180); // Position below IP
+        gfx->print("(Configure WiFi Network)"); // Add instruction
+
+        // <<< THIS IS WHERE THE MESSAGE IS SHOWN DURING AP MODE >>>
+        // No need to draw it continuously in displayClock()
+    });
+
+    Serial.println("Starting WiFiManager autoConnect...");
+    if (!wifiManager.autoConnect("FractalClockSetup")) { // AP name if portal starts
+        Serial.println("WiFiManager: Failed to connect and hit timeout");
+        gfx->fillScreen(BLACK); // Clear AP mode message
+        gfx->setCursor(10, h/2 -10); gfx->setTextColor(RED); gfx->setTextSize(1); gfx->setFont(NULL);
+        gfx->print("WiFi Config Failed/Timeout!");
+        delay(3000);
+        return false;
+    }
+
+    // Connected successfully
+    Serial.println("\nWiFi connected!");
+    Serial.print("IP address: "); Serial.println(WiFi.localIP());
+    gfx->fillScreen(BLACK); // Clear AP mode message
+    gfx->setCursor(10, h/2 -10); gfx->setTextColor(WHITE); gfx->setTextSize(1); gfx->setFont(NULL);
+    gfx->print("WiFi Connected!");
+    delay(1500);
+    return true;
+}
+
 
 // --- Setup ---
 void setup() {
     currentClockState = STATE_BOOTING;
     Serial.begin(115200);
-    Serial.println("Fractal Clock Simplified + Touch Starting...");
+    Serial.println("Fractal Clock + WiFiManager Starting...");
 
-    // Init GFX
+    // Init GFX & Touch
     Serial.println("Initializing GFX...");
     if (!gfx->begin()) { Serial.println("gfx->begin() failed!"); while (1); }
-    w = gfx->width(); // Set global dimensions
-    h = gfx->height();
-    initializeColors(); // Initialize colors now that gfx is ready
-    Serial.println("GFX Initialized.");
-    Serial.printf("Display resolution: %d x %d\n", w, h);
+    w = gfx->width(); h = gfx->height();
+    initializeColors(); // Init colors after GFX is ready
+    Serial.println("GFX Initialized."); Serial.printf("Display: %dx%d\n", w, h);
     gfx->fillScreen(BLACK);
-
-    // Init Touch
-    Serial.println("Initializing I2C for Touch...");
+    Serial.println("Initializing Touch...");
     Wire.begin(TOUCH_GT911_SDA, TOUCH_GT911_SCL);
-    Serial.println("Initializing GT911 Touch Controller (TAMC_GT911)...");
     ts_ptr = new TAMC_GT911(TOUCH_GT911_SDA, TOUCH_GT911_SCL, TOUCH_GT911_INT, TOUCH_GT911_RST, max(w, h), min(w, h));
     if (!ts_ptr) { Serial.println("Failed touch alloc!"); while (1); }
     ts_ptr->begin();
-    ts_ptr->setRotation(ROTATION_NORMAL);
     Serial.println("GT911 Initialized.");
-
-    // Backlight
     #ifdef GFX_BL
         pinMode(GFX_BL, OUTPUT); digitalWrite(GFX_BL, HIGH); Serial.println("Backlight ON.");
     #endif
 
-    // Network & Time Setup
-    currentClockState = STATE_WAITING_FOR_WIFI;
-    gfx->setTextColor(WHITE); gfx->setTextSize(1); gfx->setFont(NULL);
-    gfx->setCursor(10, h/2 -10); gfx->print("Connecting to WiFi...");
-    connectToWiFi();
+    // --- Network and Time Setup using WiFiManager ---
+    currentClockState = STATE_WAITING_FOR_WIFI; // Tentative state
 
-    if (WiFi.status() == WL_CONNECTED) {
+    wifiManager.resetSettings(); // FIXME
+
+    if (connectOrConfigureWiFi()) { // Try connecting or start config portal
+        // WiFi is Connected! Proceed with NTP
         currentClockState = STATE_WAITING_FOR_NTP;
-        syncTimeNTP();
-        if (timeSynchronized) {
+        syncTimeNTP(); // Attempt NTP sync
+
+        if (timeSynchronized) { // NTP Success
             if (getLocalTime(&timeinfo, 5000)) {
                 Serial.println("Initial time obtained and stored locally.");
-                Serial.print("Current local time struct: ");
-                Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
                 lastNtpSyncMillis = millis();
                 currentClockState = STATE_RUNNING_NTP;
-                gfx->fillScreen(BLACK);
+                gfx->fillScreen(BLACK); // Clear previous messages
                 displayStaticElements(&timeinfo);
-            } else {
+            } else { // Seeding failed
                 Serial.println("Error: Failed to seed time after NTP sync!");
                 timeSynchronized = false;
-                currentClockState = STATE_SETTING_TIME;
+                currentClockState = STATE_SETTING_TIME; // Fallback
             }
-        } else {
+        } else { // NTP Failed
             Serial.println("Initial NTP sync failed. Entering manual time set mode.");
             currentClockState = STATE_SETTING_TIME;
         }
-    } else {
-        WiFi.mode(WIFI_OFF); // <<< ADD HERE: Turn off WiFi
-        btStop(); // Also disable Bluetooth if not needed
-        Serial.println("WiFi connection failed. Entering manual time set mode.");
+    } else { // WiFiManager failed (timeout or couldn't connect)
+        Serial.println("WiFi connection failed via WiFiManager. Entering manual time set mode.");
         currentClockState = STATE_SETTING_TIME;
         timeSynchronized = false;
     }
 
+    // --- Initialize Manual Time Set if Needed ---
     if (currentClockState == STATE_SETTING_TIME) {
         Serial.println("Initializing time for manual setting.");
         timeinfo = {0}; timeinfo.tm_hour = 12; timeinfo.tm_min = 0; timeinfo.tm_sec = 0;
@@ -235,31 +288,27 @@ void setup() {
         displaySetTimeScreen(&timeinfo);
     }
 
-    previousMillis = millis();
+    previousMillis = millis(); // Start the 1-second display timer
 }
 
 // --- Loop ---
 void loop() {
     unsigned long currentMillis = millis();
+    // bool firstDisplayDone = false; // Now global
 
     // --- Read Touch Input ---
     bool istouched_now = false;
-    int currentTouchX = -1, currentTouchY = -1; // Store current coords if touched
+    int currentTouchX = -1, currentTouchY = -1;
     if (ts_ptr) {
         ts_ptr->read();
         istouched_now = ts_ptr->isTouched;
         if (istouched_now && ts_ptr->touches > 0) {
             currentTouchX = ts_ptr->points[0].x;
             currentTouchY = ts_ptr->points[0].y;
-            // Update touch visibility tracking
-            lastDisplayedTouchX = currentTouchX;
-            lastDisplayedTouchY = currentTouchY;
-            lastTouchMillis = currentMillis; // Reset timeout timer
-            if (!touchCoordsVisible) { // If it just became visible
-                 touchCoordsVisible = true;
-                 // Force redraw by making stored string different
-                 previousTouchCoordsStr[0] = ' ';
-                 previousTouchCoordsStr[1] = '\0';
+            lastDisplayedTouchX = currentTouchX; lastDisplayedTouchY = currentTouchY;
+            lastTouchMillis = currentMillis;
+            if (!touchCoordsVisible) {
+                 touchCoordsVisible = true; previousTouchCoordsStr[0] = ' '; previousTouchCoordsStr[1] = '\0';
             }
         }
     }
@@ -267,7 +316,7 @@ void loop() {
     // --- Main State Machine ---
     switch (currentClockState) {
         case STATE_SETTING_TIME:
-            handleTimeSettingTouch(); // Handles touch actions and redraws set screen
+            handleTimeSettingTouch();
             firstDisplayDone = false;
             break;
 
@@ -278,47 +327,52 @@ void loop() {
             // Fall through
 
         case STATE_RUNNING_MANUAL:
-            if (currentMillis - previousMillis >= interval) {
+            if (currentMillis - previousMillis >= interval) { // 1-second tick
                 previousMillis = currentMillis;
                 if (timeSynchronized) {
                     time_t currentTimeSec = mktime(&timeinfo);
                     currentTimeSec += 1;
                     localtime_r(&currentTimeSec, &timeinfo);
                     if (needsStaticRedraw) {
-                        Serial.println("Redrawing static elements after manual set.");
+                        Serial.println("Redrawing static elements.");
                         gfx->fillScreen(BLACK);
                         displayStaticElements(&timeinfo);
                         needsStaticRedraw = false;
                     }
-                    displayClock(&timeinfo); // Update Time and Factors
+                    displayClock(&timeinfo); // Update Time, Factors, IP
                     firstDisplayDone = true;
                 }
             }
-            else if (timeSynchronized && !firstDisplayDone) {
+            else if (timeSynchronized && !firstDisplayDone) { // Initial draw after setup/OK
                  if (needsStaticRedraw) {
-                     gfx->fillScreen(BLACK);
-                     displayStaticElements(&timeinfo);
-                     needsStaticRedraw = false;
+                     gfx->fillScreen(BLACK); displayStaticElements(&timeinfo); needsStaticRedraw = false;
                  }
                  displayClock(&timeinfo);
                  firstDisplayDone = true;
             }
             break;
 
-        // Other states (Waiting, Booting) are handled in setup or implicitly
-        case STATE_WAITING_FOR_WIFI:
-        case STATE_WAITING_FOR_NTP:
+        case STATE_WAITING_FOR_WIFI: // Handled by WiFiManager blocking call
+        case STATE_WAITING_FOR_NTP:  // Transitions in setup
         case STATE_BOOTING:
-            break; // Do nothing in loop for these states for now
+            // Wait or display specific message if needed, setup handles transitions
+            break;
     }
 
-
-
+    // --- Display Touch Coordinates ---
+    if(currentClockState != STATE_SETTING_TIME) {
+        displayTouchCoords();
+    } else { // Ensure cleared if entering set mode
+        if (touchCoordsVisible) {
+             if (prev_touch_coords_w > 0) { gfx->fillRect(prev_touch_coords_x, prev_touch_coords_y, prev_touch_coords_w, prev_touch_coords_h, BLACK); prev_touch_coords_w = 0; }
+             touchCoordsVisible = false; previousTouchCoordsStr[0] = '\0';
+        }
+    }
 
     // Reset touch debounce flag when touch is released
     if (!istouched_now) {
         touchRegisteredThisPress = false;
     }
-    displayTouchCoords();
+
     yield(); // Yield for system tasks
 }

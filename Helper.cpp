@@ -29,6 +29,7 @@ const GFXfont *font_freesans12 = &FreeSans12pt7b;
 const char *Wochentage[] = {"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"};
 const char *Monate[] = {"Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"};
 
+const unsigned long touchDisplayTimeout = 3000; // 3 seconds (or your desired value)
 
 // --- Time Setting Layout Globals ---
 int set_time_y_top = 330;
@@ -160,160 +161,110 @@ void displayStaticElements(const struct tm* currentTime) {
     }
 }
 
-// Updates dynamic elements (Time, Factors)
-void displayClock(const struct tm* currentTime) {
-    if (currentTime == NULL) { return; }
-    if (currentClockState == STATE_SETTING_TIME) return;
+// In Helper.cpp
 
-    // Static vars for erase tracking...
+// ... (includes and other functions) ...
+
+// In Helper.cpp
+
+void displayClock(const struct tm* currentTime) {
+    if (currentTime == NULL) {
+        Serial.println("DisplayClock Error: Received NULL time pointer.");
+        return;
+    }
+    // Don't draw if in time setting mode
+    if (currentClockState == STATE_SETTING_TIME) {
+        return;
+    }
+
+    // Static vars for erase tracking
     static char previousTimeStr[9] = "";
-    static int16_t prev_time_y = -1;
-    static uint16_t prev_time_w = 0, prev_time_h = 0;
-    static char previousFactorStr[MAX_FACTOR_STR_LEN] = ""; // Store previous factor string
-    static uint16_t prev_factor_h = 0;
-    static int16_t prev_factor_y1 = 0;
+    static int16_t prev_time_y = -1; // Stores top Y where previous time was drawn
+    static uint16_t prev_time_w = 0, prev_time_h = 0; // Stores dimensions of previous time
+    static char previousFactorStr[MAX_FACTOR_STR_LEN] = ""; // Stores previous combined factor string
+    static uint16_t prev_factor_h = 0;  // Stores height of previous factor string box
+    static int16_t prev_factor_y1 = 0; // Stores relative y1 offset of previous factor string
 
     // --- Fonts ---
-    const GFXfont *timeFont = font_freesansbold18; // Size 2 for drawing
-    const GFXfont *factorFont = font_freesans18;  // Size 1 for drawing
+    const GFXfont *mainFont = font_freesansbold18; // For Time (Size 2)
+    const GFXfont *subFont = font_freesans18;   // For Factors line (Size 1)
 
-    // --- Calculate Font Heights ---
-    int16_t temp_x, temp_y;
-    uint16_t temp_w, mainFontHeight, factorFontHeight, rssDummyHeight;
-    gfx->setFont(timeFont); gfx->setTextSize(1); // Get base height
-    gfx->getTextBounds("M", 0, 0, &temp_x, &temp_y, &temp_w, &mainFontHeight);
-    int timeHeight = mainFontHeight * 2; // Approx height for Time (size 2)
-    gfx->setFont(factorFont); gfx->setTextSize(1);
-    gfx->getTextBounds("0", 0, 0, &temp_x, &temp_y, &temp_w, &factorFontHeight);
-    gfx->setFont(font_freesans12); gfx->setTextSize(1); // Dummy RSS height
-    gfx->getTextBounds("X", 0, 0, &temp_x, &temp_y, &temp_w, &rssDummyHeight);
+    // --- Calculate Font Heights needed for Layout ---
+    int16_t temp_x_t, temp_y_t, temp_x_f, temp_y_f; // Temporary vars for bounds
+    uint16_t temp_w_t, time_h, temp_w_f, factor_h, mainFontHeight; // Store heights
+    // Get base height of main font (size 1) to calculate time height and static spacing
+    gfx->setFont(mainFont); gfx->setTextSize(1);
+    gfx->getTextBounds("M", 0, 0, &temp_x_t, &temp_y_t, &temp_w_t, &mainFontHeight);
+    // Get actual height of Time text (main font size 2)
+    gfx->setFont(mainFont); gfx->setTextSize(2);
+    gfx->getTextBounds("00:00:00", 0, 0, &temp_x_t, &temp_y_t, &temp_w_t, &time_h);
+    // Get actual height of Factors text (sub font size 1)
+    gfx->setFont(subFont); gfx->setTextSize(1);
+    gfx->getTextBounds("0", 0, 0, &temp_x_f, &temp_y_f, &temp_w_f, &factor_h);
 
-    // --- Define Spacing ---
+    // --- Calculate Vertical Layout for the 4 Lines ---
     int lineSpacing = 10;
-    int spacing_factors_to_dummy = 40; // Keep consistent spacing
+    // Total height: Weekday(main1) + Date(main1) + Time(size2) + Factors(sub1) + 3 * spacing
+    int totalHeight = (mainFontHeight * 2) + time_h + factor_h + (lineSpacing * 3);
+    int startY = (h - totalHeight) / 2; // Center the entire 4-line block vertically
+    if (startY < 5) startY = 5; // Ensure minimum top margin
 
-    // --- Calculate Total Height & Centering (based on 5 potential lines) ---
-    int totalHeight = (mainFontHeight * 2) + timeHeight + factorFontHeight + rssDummyHeight +
-                      (lineSpacing * 3) + spacing_factors_to_dummy;
-    int startY = (h - totalHeight) / 2; if (startY < 5) startY = 5;
+    // Calculate Y positions for the TOP edge of dynamic elements
+    // Based on the positions of the static elements calculated from startY
+    int y_time_top_target = 170;//startY + (mainFontHeight * 2) + (lineSpacing * 2); // FIXME: 
+    int y_factor_top_target = y_time_top_target + time_h + lineSpacing;       // Below Time line
 
-    // --- Calculate Y positions for dynamic elements ---
-    int y_time_top_target = startY + (mainFontHeight * 2) + (lineSpacing * 2); // Target based on static elements
-    int y_factor_top_target = y_time_top_target + timeHeight + lineSpacing; // Target for factor line
-
-    // --- Generate Current Time String ---
+    // --- Generate Current Time & Factor Strings ---
     char timeStr[9];
     snprintf(timeStr, sizeof(timeStr), "%02d:%02d:%02d", currentTime->tm_hour, currentTime->tm_min, currentTime->tm_sec);
-
-    // --- Calculate Factors for CURRENT time ---
     int timeNum = currentTime->tm_hour * 10000 + currentTime->tm_min * 100 + currentTime->tm_sec;
     char factorBuffer[MAX_FACTOR_STR_LEN];
     primeFactorsToString(timeNum, factorBuffer, sizeof(factorBuffer)); // Calculate directly
     char combinedOutputStr[10 + MAX_FACTOR_STR_LEN];
     snprintf(combinedOutputStr, sizeof(combinedOutputStr), "%06d=%s", timeNum, factorBuffer);
 
-    // --- Update Time Display ---
+    // --- Update Time Display (Centered, Large) ---
     if (strcmp(timeStr, previousTimeStr) != 0) {
+        // 1. Erase Previous Time
         if (prev_time_w > 0 && prev_time_h > 0 && prev_time_y >= 0) {
-             int16_t prev_abs_x = (w - prev_time_w) / 2;
+             int16_t prev_abs_x = (w - prev_time_w) / 2; // Center X
              gfx->fillRect(prev_abs_x, prev_time_y, prev_time_w, prev_time_h, BLACK);
         }
-        centerText(timeStr, y_time_top_target, WHITE, timeFont, 2); // Draw large time
+        // 2. Draw New Time
+        centerText(timeStr, y_time_top_target, WHITE, mainFont, 2); // Draw at calculated Y target
+
+        // 3. Store Bounds for Next Erase
         int16_t new_x1, new_y1;
-        gfx->setFont(timeFont); gfx->setTextSize(2);
+        gfx->setFont(mainFont); gfx->setTextSize(2); // Ensure correct font/size for bounds
         gfx->getTextBounds(timeStr, 0, 0, &new_x1, &new_y1, &prev_time_w, &prev_time_h);
-        prev_time_y = y_time_top_target; // Store Y top edge used
+        prev_time_y = y_time_top_target; // Store the Top Y edge used for drawing
         strcpy(previousTimeStr, timeStr);
     }
 
-    // --- Update Factors Display ---
+    // --- Update Factors Display (Left Aligned) ---
     if (strcmp(combinedOutputStr, previousFactorStr) != 0) {
         int left_margin = 4;
-        if (prev_factor_h > 0) { // Clear previous
-            // Simplified clear: Use target Y and previous height
+        // 1. Erase Previous Factors Line (Full Width)
+        if (prev_factor_h > 0) {
+             // Clear using the target Y top and the previous height
              gfx->fillRect(0, y_factor_top_target, w, prev_factor_h, BLACK);
         }
-        // Draw new factors line
-        gfx->setFont(factorFont); gfx->setTextSize(1); gfx->setTextColor(WHITE);
-        int16_t x1, y1; uint16_t w1, h1;
-        gfx->getTextBounds(combinedOutputStr, 0, 0, &x1, &y1, &w1, &h1);
-        int cursor_y = y_factor_top_target - y1; // Align top edge
+        // 2. Draw New Factors Line
+        gfx->setFont(subFont); gfx->setTextSize(1); gfx->setTextColor(WHITE);
+        int16_t x1_comb, y1_comb; uint16_t w1_comb, h1_comb;
+        gfx->getTextBounds(combinedOutputStr, 0, 0, &x1_comb, &y1_comb, &w1_comb, &h1_comb);
+        int cursor_y = y_factor_top_target - y1_comb; // Calculate baseline to align top edge
         gfx->setCursor(left_margin, cursor_y);
         gfx->print(combinedOutputStr);
-        // Store info for next erase
+
+        // 3. Store Bounds for Next Erase
         strcpy(previousFactorStr, combinedOutputStr);
-        prev_factor_h = h1;
-        prev_factor_y1 = y1; // Not used in simplified clear, but store anyway
-    }
-}
-
-// Draws the current touch coordinates with timeout
-void displayTouchCoords() {
-    char currentCoordsStr[20];
-    bool needsRedraw = false;
-    bool clearNeeded = false;
-
-    if (touchCoordsVisible) {
-        // Check for timeout
-        if (millis() - lastTouchMillis > touchDisplayTimeout) {
-            touchCoordsVisible = false;
-            clearNeeded = true; // Need to clear the last drawn coords
-            strcpy(currentCoordsStr, ""); // Ensure comparison string is empty
-        } else {
-            // Format current visible coords
-            snprintf(currentCoordsStr, sizeof(currentCoordsStr), " T:X%3d,Y%3d", lastDisplayedTouchX, lastDisplayedTouchY);
-            // Check if redraw is needed (content hasn't changed, but maybe it was cleared?)
-             if(strcmp(currentCoordsStr, previousTouchCoordsStr) != 0 || prev_touch_coords_w == 0) {
-                 needsRedraw = true;
-             }
-        }
-    } else {
-        // Ensure comparison string is empty when not visible
-        strcpy(currentCoordsStr, "");
-        if(prev_touch_coords_w > 0) { // If something was drawn before, clear it
-            clearNeeded = true;
-        }
+        prev_factor_h = h1_comb; // Store height of the text just drawn
+        prev_factor_y1 = y1_comb; // Store baseline offset (not used in current clear)
     }
 
-     // Compare with previous string to decide on action
-     if (strcmp(currentCoordsStr, previousTouchCoordsStr) != 0 || needsRedraw || clearNeeded) {
-         // --- 1. Clear Previous ---
-         if (prev_touch_coords_w > 0) {
-            gfx->fillRect(prev_touch_coords_x, prev_touch_coords_y, prev_touch_coords_w, prev_touch_coords_h, BLACK);
-            prev_touch_coords_w = 0; // Mark as cleared
-         }
+} // End displayClock
 
-         // --- 2. Draw New (if visible) ---
-         if (touchCoordsVisible) {
-            gfx->setFont(NULL); // Default font
-            gfx->setTextSize(1); // Small size
-            gfx->setTextColor(YELLOW);
-
-            int16_t x1, y1; uint16_t w1, h1;
-            gfx->getTextBounds(currentCoordsStr, 0, 0, &x1, &y1, &w1, &h1);
-
-            uint16_t drawAreaX = 0; // Top-left corner
-            uint16_t drawAreaY = 0;
-
-            int cursorX = drawAreaX - x1;
-            int cursorY = drawAreaY - y1; // Align top edge
-
-            gfx->setCursor(cursorX, cursorY);
-            gfx->print(currentCoordsStr);
-
-            // Store bounds for next clear
-            prev_touch_coords_x = cursorX + x1;
-            prev_touch_coords_y = cursorY + y1;
-            prev_touch_coords_w = w1;
-            prev_touch_coords_h = h1;
-         } else {
-             // Reset bounds if not visible (already cleared)
-             prev_touch_coords_w = 0;
-             prev_touch_coords_h = 0;
-         }
-         strcpy(previousTouchCoordsStr, currentCoordsStr); // Update comparison string
-     }
-}
 
 // Centers text horizontally, aligns top edge vertically
 void centerText(const char *text, int y, uint16_t color, const GFXfont *font, uint8_t size) {
@@ -331,7 +282,13 @@ void centerText(const char *text, int y, uint16_t color, const GFXfont *font, ui
 #include "CustomDef.h" // Includes defines and globals
 #include "Helper.h"    // Includes function declarations
 
-// ... other global definitions from Helper.cpp (colors, fonts, etc.) ...
+
+// IP Address Display Tracking
+char previousIPInfoString[50] = ""; // <<< ADDED definition
+uint16_t prev_ip_x = 0;          // <<< ADDED definition
+uint16_t prev_ip_y = 0;          // <<< ADDED definition
+uint16_t prev_ip_w = 0;          // <<< ADDED definition
+uint16_t prev_ip_h = 0;          // <<< ADDED definition
 
 
 // --- Display Time Setting Screen ---
@@ -580,4 +537,76 @@ void primeFactorsToString(int n, char* buffer, size_t bufferSize) {
 
 end_factorization:
     buffer[bufferSize - 1] = '\0'; // Ensure null termination
+}
+
+// --- COMPLETE FUNCTION ---
+// Draws the current touch coordinates with timeout in top-left corner
+void displayTouchCoords() {
+    char currentCoordsStr[20]; // Buffer for "T:XXX,YYY"
+    bool needsClear = false;
+    bool needsDraw = false;
+
+    // --- Determine current state ---
+    if (touchCoordsVisible) {
+        // Check for timeout first
+        if (millis() - lastTouchMillis > touchDisplayTimeout) {
+            // Timeout expired
+            touchCoordsVisible = false;
+            if (strlen(previousTouchCoordsStr) > 0) { // Only clear if something was there
+                needsClear = true;
+            }
+            currentCoordsStr[0] = '\0'; // Target state is empty
+        } else {
+            // Still visible, format the string to potentially draw
+            snprintf(currentCoordsStr, sizeof(currentCoordsStr), "T:%3d,%3d", lastDisplayedTouchX, lastDisplayedTouchY);
+            // Check if the content changed OR if the area was previously cleared
+            if (strcmp(currentCoordsStr, previousTouchCoordsStr) != 0 || prev_touch_coords_w == 0) {
+                 needsDraw = true; // Need to draw the new/existing coords
+                 if (strlen(previousTouchCoordsStr) > 0) {
+                     needsClear = true; // Clear old ones first if content changed
+                 }
+            }
+        }
+    } else {
+        // Not visible, ensure it's cleared if it was visible before
+        currentCoordsStr[0] = '\0'; // Target state is empty
+        if (strlen(previousTouchCoordsStr) > 0) { // If previous string wasn't empty
+            needsClear = true;
+        }
+    }
+
+     // --- Perform Actions ---
+     if (needsClear) {
+         if (prev_touch_coords_w > 0) { // Check if dimensions are valid
+            gfx->fillRect(prev_touch_coords_x, prev_touch_coords_y, prev_touch_coords_w, prev_touch_coords_h, BLACK);
+            prev_touch_coords_w = 0; // Mark as cleared visually
+         }
+     }
+
+     if (needsDraw) { // Only draw if state is visible and needs update
+         gfx->setFont(NULL); // Default font
+         gfx->setTextSize(1); // Small size
+         gfx->setTextColor(YELLOW);
+
+         int16_t x1, y1; uint16_t w1, h1;
+         gfx->getTextBounds(currentCoordsStr, 0, 0, &x1, &y1, &w1, &h1);
+
+         uint16_t drawAreaX = 0; // Top-left corner
+         uint16_t drawAreaY = 0;
+
+         int cursorX = drawAreaX - x1;
+         int cursorY = drawAreaY - y1; // Align top edge
+
+         gfx->setCursor(cursorX, cursorY);
+         gfx->print(currentCoordsStr);
+
+         // Store bounds for next clear
+         prev_touch_coords_x = cursorX + x1;
+         prev_touch_coords_y = cursorY + y1;
+         prev_touch_coords_w = w1;
+         prev_touch_coords_h = h1;
+     }
+
+     // Update comparison string for next cycle
+     strcpy(previousTouchCoordsStr, currentCoordsStr);
 }

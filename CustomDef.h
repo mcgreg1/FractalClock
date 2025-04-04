@@ -3,6 +3,7 @@
 
 // --- Library Includes ---
 #include <WiFi.h>                  // For WiFi
+#include <WiFiManager.h>
 #include <time.h>                  // For NTP time and time functions
 #include <Wire.h>                  // For I2C communication
 #include <TAMC_GT911.h>            // GT911 Touch library
@@ -31,6 +32,9 @@ extern Arduino_RGB_Display *gfx;      // Declare as extern
 // --- WiFi Credentials ---
 extern const char *ssid;     // DECLARATION ONLY
 extern const char *password; // DECLARATION ONLY
+
+// WiFiManager Object
+extern WiFiManager wifiManager; // <<< ADDED
 
 // --- NTP Settings ---
 extern const char *ntpServer; // DECLARATION ONLY
